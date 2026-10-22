@@ -1,0 +1,15 @@
+# deps / env
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# per-request scratch
+_challenge.js
+
+# bulky captures & minified bundles kept only as local reference
+legacy/cap/
+legacy/entry.duckai.*.js
+legacy/js_entry.*.js
+legacy/vendors.js
+legacy/lib.*.js

@@ -91,7 +91,8 @@ straight through.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+0BSD (Zero-Clause BSD) — see [LICENSE](LICENSE). Same warranty/liability
+disclaimer as MIT, without the attribution requirement.
 
 ## Difference from benoitpetit/duckduckgo-chat-cli
 

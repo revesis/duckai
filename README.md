@@ -89,6 +89,10 @@ straight through.
     pip install -r requirements.txt     # requests only
     npm install                         # jsdom, needs node >= 18
 
+## License
+
+MIT — see [LICENSE](LICENSE).
+
 ## Difference from benoitpetit/duckduckgo-chat-cli
 
 That project drives a real Chrome via chromedp, intercepts the live request and

@@ -19,11 +19,16 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 
 import requests
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# ``solve()`` writes the challenge to a fixed path, so concurrent callers must not overlap.
+_SOLVE_LOCK = threading.Lock()
+
 BASE = "https://duck.ai"
 UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/145.0.0.0 Safari/537.36")
@@ -49,6 +54,14 @@ def sha256_b64(text: str) -> str:
 
 def b64_json(obj) -> str:
     return b64(json.dumps(obj, separators=(",", ":")).encode())
+
+
+class DuckAIError(RuntimeError):
+    """Upstream refusal after all retries (carries the last HTTP status when known)."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 class DuckAI:
@@ -81,12 +94,13 @@ class DuckAI:
 
     def solve(self, js_source: str) -> dict:
         path = os.path.join(HERE, "_challenge.js")
-        with open(path, "w") as fh:
-            fh.write(js_source)
-        out = subprocess.run(
-            ["node", os.path.join(HERE, "jsa_jsdom.js"), path, self.ua],
-            capture_output=True, text=True, timeout=90,
-        )
+        with _SOLVE_LOCK:
+            with open(path, "w") as fh:
+                fh.write(js_source)
+            out = subprocess.run(
+                ["node", os.path.join(HERE, "jsa_jsdom.js"), path, self.ua],
+                capture_output=True, text=True, timeout=90,
+            )
         if out.returncode != 0 or not out.stdout.strip():
             raise RuntimeError(f"challenge runner failed: {out.stderr[:400]}")
         result = json.loads(out.stdout)
@@ -131,8 +145,10 @@ class DuckAI:
         return self.s.post(BASE + "/duckchat/v1/chat", headers=headers,
                            data=json.dumps(body), stream=True, timeout=self.timeout)
 
-    def ask(self, prompt: str, model: str = "gpt-6-luna", on_delta=None, retries: int = 4) -> str:
+    def stream(self, prompt: str, model: str = "gpt-6-luna", retries: int = 4):
+        """Yield the answer incrementally (text deltas) as the SSE stream arrives."""
         last = ""
+        status = None
         for attempt in range(retries):
             self.bootstrap()
             solved = self.solve(self.fetch_challenge())
@@ -140,12 +156,13 @@ class DuckAI:
             r = self.chat(prompt, model)
             if r.status_code == 200:
                 break
+            status = r.status_code
             last = f"HTTP {r.status_code}: {r.text[:200]}"
             # 418 = DuckDuckGo's fraud score said no; a fresh challenge often clears it.
             time.sleep(2 + attempt * 2)
         else:
-            raise RuntimeError(f"chat failed after {retries} attempts: {last}")
-        parts = []
+            raise DuckAIError(f"chat failed after {retries} attempts: {last}", status=status)
+
         for raw in r.iter_lines():
             if not raw or not raw.startswith(b"data: "):
                 continue
@@ -154,10 +171,15 @@ class DuckAI:
             except json.JSONDecodeError:
                 continue
             msg = ev.get("message")
-            if isinstance(msg, str):
-                parts.append(msg)
-                if on_delta:
-                    on_delta(msg)
+            if isinstance(msg, str) and msg:
+                yield msg
+
+    def ask(self, prompt: str, model: str = "gpt-6-luna", on_delta=None, retries: int = 4) -> str:
+        parts = []
+        for delta in self.stream(prompt, model=model, retries=retries):
+            parts.append(delta)
+            if on_delta:
+                on_delta(delta)
         return "".join(parts)
 
 

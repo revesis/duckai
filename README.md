@@ -38,6 +38,102 @@ claude-haiku-4-5 / mistral-small-2603
 (verified working: gpt-6-luna, gpt-5.4-nano, claude-haiku-4-5, mistral-small-2603;
 `tinfoil/gpt-oss-120b` and `tinfoil/gemma4-31b` return 400 on this path)
 
+### What the endpoint refuses (measured 2026-10-22)
+
+| Sent | Result |
+|---|---|
+| `role: "system"` in `messages` | 400 `ERR_BAD_REQUEST` |
+| `role: "assistant"` in `messages` (with or without `id`/`createdAt`/`meta`) | 400 `ERR_BAD_REQUEST` |
+| several `role: "user"` messages | 200 — but only the last one is answered |
+| a `tools` / `tool_choice` array | 400 on the field, no function calling upstream |
+| prompt > ~16k chars (16k OK, 20k `ERR_INPUT_LIMIT`) | 429 `ERR_INPUT_LIMIT` |
+
+So duck.ai is a stateless single-turn chat: history and system instructions have
+to be folded into the one user turn by the caller (which `duckai_server.py` does).
+
+## OpenAI-compatible bridge (Hermes, Aider, Cline, openai-python …)
+
+`duckai_server.py` exposes the client as a normal OpenAI endpoint — stdlib HTTP
+server, no extra dependencies:
+
+    python3 duckai_server.py --port 8765          # or DUCKAI_PORT / DUCKAI_HOST
+    curl -s localhost:8765/v1/models
+    curl -sN localhost:8765/v1/chat/completions -H 'Content-Type: application/json' \
+         -d '{"model":"gpt-5.4-nano","stream":true,
+              "messages":[{"role":"user","content":"Say hi"}]}'
+
+Routes: `GET /health`, `GET /v1/models`, `POST /v1/chat/completions`
+(`stream` true or false, OpenAI chunk format). Bridge behaviour:
+
+- system prompt → a `System instructions:` block, history → a
+  `Conversation so far:` transcript, last user turn kept verbatim;
+- prompts are trimmed head+tail to `DUCKAI_MAX_PROMPT_CHARS` (default 15000,
+  under the ~16k upstream ceiling);
+- upstream calls are serialized (DuckDuckGo's fraud score punishes bursts) and
+  retried with a fresh challenge on 418; `ERR_INPUT_LIMIT` surfaces as HTTP 429;
+- `tools` are dropped: the model answers in prose and never emits tool calls;
+- `DUCKAI_API_KEY` (optional) turns on bearer auth — `/health` stays open, every
+  other route then needs `Authorization: Bearer <key>` or `x-api-key: <key>`.
+
+### Docker
+
+```bash
+docker build -t duckai-bridge .
+docker run -d --name duckai-bridge -p 127.0.0.1:8765:8765 --restart unless-stopped duckai-bridge
+
+# exposed on a server: require a key
+docker run -d --name duckai-bridge -p 8765:8765 -e DUCKAI_API_KEY=change-me \
+       --restart unless-stopped duckai-bridge
+```
+
+Multi-stage (`node:24-bookworm-slim` for jsdom, same base for the Python venv),
+runs as uid 10001, `EXPOSE 8765`, built-in `HEALTHCHECK` on `/health`. Env knobs:
+`DUCKAI_PORT`, `DUCKAI_MAX_PROMPT_CHARS`, `DUCKAI_API_KEY`.
+
+With podman, build with `--format docker` — podman defaults to OCI, which drops
+the `HEALTHCHECK` instruction:
+
+```bash
+podman build --format docker -t duckai-bridge .
+podman run -d --name duckai-bridge -p 127.0.0.1:8765:8765 duckai-bridge
+```
+
+### Hermes Agent
+
+```bash
+python3 duckai_server.py --port 8765 &          # keep it running
+
+hermes config set model_aliases.duckai.model gpt-6-luna
+hermes config set model_aliases.duckai.provider custom
+hermes config set model_aliases.duckai.base_url http://127.0.0.1:8765/v1
+hermes config set model_aliases.duckai.api_key local-duckai   # bridge ignores it
+hermes config set model_overrides.custom.gpt-6-luna.context_window 64000  # Hermes' floor
+
+hermes chat -m duckai -q "hello"                # one-shot
+# in a session: /model duckai   (add --global to make it the default)
+```
+
+Verified end to end on 2026-10-22: `hermes chat -m duckai` → bridge → duck.ai
+answered in ~10 s. Hermes' own prompt is ~23k chars, trimmed to 15k by the
+bridge, which costs the middle of the system prompt — expect a chat assistant,
+not a full agent: tool calls are impossible upstream, so file edits, shell
+commands and web search never fire.
+
+A systemd unit to keep the bridge alive:
+
+    [Unit]
+    Description=duck.ai OpenAI-compatible bridge
+    After=network-online.target
+
+    [Service]
+    WorkingDirectory=/root/codex/duckai
+    ExecStart=/root/codex/duckai/.venv/bin/python duckai_server.py --port 8765
+    Restart=always
+
+    [Install]
+    WantedBy=default.target
+
+
 ## What the challenge (X-Vqd-Hash-1 / "jsa") actually is
 
 - Every `/status` call returns an obfuscated `(async function(){...})()` that
@@ -79,6 +175,7 @@ straight through.
 ## Files
 
 - `duckai_client.py`  — main client (protocol + retries + streaming output)
+- `duckai_server.py`  — OpenAI-compatible HTTP bridge (`/v1/chat/completions`, `/v1/models`)
 - `jsa_jsdom.js`      — jsdom challenge solver (challenge JS in, proof material JSON out)
 - `check_variants.py` — solves 8 challenge variants to catch solver regressions
 - `deob.js`           — debugging aid: decodes the challenge's obfuscated string table

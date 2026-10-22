@@ -1,0 +1,6 @@
+# Python dependencies for the duck.ai client (everything else is stdlib).
+#
+# The challenge solver (jsa_jsdom.js) is JavaScript, so it is not covered here:
+#     node >= 18
+#     npm install            # installs jsdom from package.json
+requests==2.33.0

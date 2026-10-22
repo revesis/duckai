@@ -81,8 +81,8 @@ jsdom 得 `["<UA>","5510","7686"]` —— 只差 webdriver 那一位（Chrome �
 
 ## 依赖
 
-    pip install requests
-    npm install jsdom          # node >= 18
+    pip install -r requirements.txt     # 只有 requests
+    npm install                         # jsdom，需 node >= 18
 
 ## 和 benoitpetit/duckduckgo-chat-cli 的差别
 

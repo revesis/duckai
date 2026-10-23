@@ -13,3 +13,6 @@ legacy/entry.duckai.*.js
 legacy/js_entry.*.js
 legacy/vendors.js
 legacy/lib.*.js
+
+# local compose overrides
+.env

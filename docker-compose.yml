@@ -1,0 +1,16 @@
+# docker compose up -d --build
+#
+# Overrides go in a .env file next to this one (not committed), e.g.
+#   DUCKAI_BIND=0.0.0.0        # default 127.0.0.1 (localhost only)
+#   DUCKAI_API_KEY=change-me   # set this whenever the port is reachable from outside
+services:
+  duckai:
+    build: .
+    image: duckai-bridge:latest
+    container_name: duckai-bridge
+    restart: unless-stopped
+    ports:
+      - "${DUCKAI_BIND:-127.0.0.1}:${DUCKAI_HOST_PORT:-8765}:8765"
+    environment:
+      DUCKAI_API_KEY: ${DUCKAI_API_KEY:-}
+      DUCKAI_MAX_PROMPT_CHARS: ${DUCKAI_MAX_PROMPT_CHARS:-15000}

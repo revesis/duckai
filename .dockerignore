@@ -10,3 +10,5 @@ legacy
 Dockerfile
 .dockerignore
 README.md
+.env
+docker-compose.yml

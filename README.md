@@ -86,6 +86,13 @@ docker run -d --name duckai-bridge -p 8765:8765 -e DUCKAI_API_KEY=change-me \
        --restart unless-stopped duckai-bridge
 ```
 
+Or with compose (localhost-only by default; put `DUCKAI_BIND`, `DUCKAI_HOST_PORT`,
+`DUCKAI_API_KEY`, `DUCKAI_MAX_PROMPT_CHARS` overrides in a `.env` next to it):
+
+```bash
+docker compose up -d --build                    # also the update path after git pull
+```
+
 Multi-stage (`node:24-bookworm-slim` for jsdom, same base for the Python venv),
 runs as uid 10001, `EXPOSE 8765`, built-in `HEALTHCHECK` on `/health`. Env knobs:
 `DUCKAI_PORT`, `DUCKAI_MAX_PROMPT_CHARS`, `DUCKAI_API_KEY`.
